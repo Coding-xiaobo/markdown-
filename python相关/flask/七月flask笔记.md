@@ -1,6 +1,6 @@
-# 1. Flask的基础原理与核心知识
+## 1. Flask的基础原理与核心知识
 
-## 1.1 pipenv创建虚拟环境
+### 1.1 pipenv创建虚拟环境
 
 ```cmd
 # 安装pipenv
@@ -25,7 +25,7 @@ pipenv graph
 exit
 ```
 
-## 1.2 hello world
+### 1.2 hello world
 
 ```py
 from flask import Flask
@@ -41,7 +41,7 @@ def test():
 app.run()
 ```
 
-## 1.3 另一种注册路由的方式
+### 1.3 另一种注册路由的方式
 
 ```python
 from flask import Flask
@@ -59,7 +59,7 @@ app.run(debug=True)
 
 基于类的视图，必须使用`add_url_rule`的方式
 
-## 1.4 app.run相关参数与flask配置文件
+### 1.4 app.run相关参数与flask配置文件
 
 根目录创建`config.py`作为配置文件
 
@@ -85,7 +85,7 @@ app.add_url_rule('/hello', view_func=test)
 app.run(debug=app.config['DEBUG'])
 ```
 
-## 1.5. ifmain的作用
+### 1.5. ifmain的作用
 
 ```py
 from flask import Flask
@@ -113,11 +113,11 @@ if __name__ == '__main__':
 
 这样，我们就可以根据环境的不同，选择适当的方式启动 Flask 应用。
 
-## 1.6 响应对象Response
+### 1.6 响应对象Response
 
 视图函数的return和普通函数存在不同，flask框架会在背后进行一些列的封装。
 
-现在让视图函数返回<html><h1>hello</h1></html>
+现在让视图函数返回`<html><h1>hello</h1></html>`
 
 ```py
 from flask import Flask
@@ -208,3 +208,121 @@ def test():
 ```
 
 这种方式用的最多，也是最方便的
+
+## 2. 数据与Flask路由
+
+### 2.1 api
+
+```cmd
+http://t.talelin.com/v2/
+```
+
+
+
+### 2.2 封装http请求模块
+
+```py
+# 使用requests第三方库发送请求
+import requests
+
+class HTTP(object):
+    def get(self, url, return_json=True):
+        r = requests.get(url)
+        if r.status_code != 200:
+            return {} if return_json else ''
+        return r.json() if return_json else r.text
+```
+
+
+
+### 2.3. 从API中获取数据
+
+```py
+from http import HTTP
+
+
+class YuShuBook:
+    isbn_url = 'http://t.talelin.com/v2/book/isbn/{}'
+    keyword_url = 'http://t.talelin.com/v2/book/search?q={}&count={}&start={}'
+
+    @classmethod
+    def search_by_isbn(cls, isbn):
+        url = cls.isbn_url.format(isbn)
+        # python中会将json转换成dict
+        return HTTP.get(url)
+
+    @classmethod
+    def search_by_keyword(cls,keyword, count=15, start=0):
+        url = cls.keyword_url.format(keyword, count, start)
+        # python中会将json转换成dict
+        return HTTP.get(url)
+```
+
+```py
+@app.route("/book/serach/<q>/<page>")
+def search(q: str, page: int):
+    isbn_or_key = is_isbn_or_key(q)
+    if isbn_or_key == 'key':
+        result = YuShuBook.search_by_keyword(q)
+    else:
+        result = YuShuBook.search_by_isbn(q)
+    # 把字典序列化
+    return jsonify(result)
+```
+
+### 2.4. 视图分文件，深入理解路由
+
+```py
+# app/web/book.py
+
+from flask import jsonify
+
+from helper import is_isbn_or_key
+from yushu_book import YuShuBook
+from fisher import app
+
+@app.route("/book/serach/<q>/<page>")
+def search(q: str, page: int):
+    isbn_or_key = is_isbn_or_key(q)
+    if isbn_or_key == 'key':
+        result = YuShuBook.search_by_keyword(q)
+    else:
+        result = YuShuBook.search_by_isbn(q)
+    # 把字典序列化
+    return jsonify(result)
+```
+
+```py
+from flask import Flask
+from app.web import book
+
+app = Flask(__name__)
+# 导入配置文件
+app.config.from_object('config')
+
+
+if __name__ == '__main__':
+    # 开启debug模式，修改代码会自动重启服务器
+    app.run(host='0.0.0.0', port=5000, debug=app.config['DEBUG'])
+```
+
+仅仅分文件，但book.py并没有加载到启动文件中，访问接口报404
+
+原因是两个模块互相导入，造成循环引
+
+![image-20240901231431651](./七月flask笔记.assets/image-20240901231431651.png)
+
+- 红线是fisher启动之后的主流程
+- 蓝线是book被导入之后的流程
+
+
+
+- 问题1：python中导入一次了之后就不会导入第二次了
+- 问题2：因为第一次是启动流程，而不是模块
+
+
+
+- 注册的路由是在红线流程注册的，但是启动时启动的确实蓝色的app（蓝线后执行），并没有注册路由
+
+
+
